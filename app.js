@@ -1,5 +1,7 @@
 const RADII_METERS = [800, 2000, 5000, 15000, 40000, 100000];
-const RESULT_COUNT = 4;
+// How many nearby parcels to show. Bill: to change this later, just edit
+// the number below and re-upload — nothing else needs to change.
+const RESULT_COUNT = 25;
 
 const screens = {
   start: document.getElementById('screen-start'),
@@ -165,8 +167,8 @@ function numberedPinIcon(number) {
   return L.divIcon({
     className: '', // avoid Leaflet's default marker box/shadow styling
     html: `<div class="parcel-pin"><span>${number}</span></div>`,
-    iconSize: [30, 30],
-    iconAnchor: [15, 30],
+    iconSize: [26, 26],
+    iconAnchor: [13, 26],
   });
 }
 
@@ -349,6 +351,12 @@ async function findNearby() {
     { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
   );
 }
+
+// Fill in the "how many parcels" wording from RESULT_COUNT so the two
+// places that mention a number always match what the app actually shows.
+document.getElementById('start-subtitle').textContent =
+  `Find the closest ${RESULT_COUNT} land parcels to your current location, with owner, tax, and sale info from public NC GIS records.`;
+document.getElementById('results-map-title').textContent = `Closest ${RESULT_COUNT} Parcels`;
 
 document.getElementById('find-btn').addEventListener('click', findNearby);
 document.getElementById('retry-btn').addEventListener('click', findNearby);

@@ -136,9 +136,9 @@
     background: var(--blue);
     color: #fff;
     font-weight: 700;
-    font-size: 14px;
-    width: 30px;
-    height: 30px;
+    font-size: 11px;
+    width: 26px;
+    height: 26px;
     border-radius: 50% 50% 50% 0;
     transform: rotate(-45deg);
     display: flex;
@@ -226,7 +226,7 @@
 
 <div id="screen-start" class="screen center-screen">
   <h1>Nearby Parcels</h1>
-  <p class="subtitle">Find the 4 closest land parcels to your current location, with owner, tax, and sale info from public NC GIS records.</p>
+  <p class="subtitle" id="start-subtitle">Find the closest land parcels to your current location, with owner, tax, and sale info from public NC GIS records.</p>
   <button id="find-btn" class="primary">Find Nearby Parcels</button>
 </div>
 
@@ -238,7 +238,7 @@
 <div id="screen-results-map" class="screen hidden">
   <header class="top-bar">
     <div>
-      <h2>Closest 4 Parcels</h2>
+      <h2 id="results-map-title">Closest Parcels</h2>
       <div class="sub">Tap a parcel on the map for details</div>
     </div>
     <button id="refresh-map-btn" class="link-btn">Refresh</button>
