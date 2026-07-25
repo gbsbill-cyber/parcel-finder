@@ -125,6 +125,12 @@ function formatAcres(value) {
   return `${value.toFixed(2)} acres`;
 }
 
+function formatAnnualTax(annualTax) {
+  if (!annualTax || !annualTax.amount) return 'Not publicly available';
+  const estimateTag = annualTax.estimated ? ` (estimate @ $${annualTax.ratePer100.toFixed(4)}/$100 assessed)` : '';
+  return formatMoney(annualTax.amount) + estimateTag;
+}
+
 function formatSalePrice(salePrice) {
   if (!salePrice || salePrice.amount === null || salePrice.amount === undefined) return 'Not available';
   if (salePrice.nominal) return 'Not available (nominal transfer on record, not a market sale)';
@@ -173,7 +179,7 @@ function renderResults(parcels) {
     card.appendChild(row('Address', p.address || 'Not available'));
     card.appendChild(row('Acreage', formatAcres(p.acreage)));
     card.appendChild(row('Tax-assessed value', formatMoney(p.taxValue)));
-    card.appendChild(row('Annual property tax', 'Not publicly available (see note below)'));
+    card.appendChild(row('Annual property tax', formatAnnualTax(p.annualTax)));
     card.appendChild(
       row('Last sale price', formatSalePrice(p.salePrice))
     );
