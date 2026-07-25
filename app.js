@@ -182,43 +182,64 @@ function renderResultsMap(parcels) {
   }
   resultsMarkers = [];
 
-  resultsLeafletMap = L.map('leaflet-results-map');
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; OpenStreetMap contributors',
-    maxZoom: 19,
-  }).addTo(resultsLeafletMap);
+  // IMPORTANT: the map screen was just made visible (its "hidden" class was
+  // just removed) on the line above. If we build the Leaflet map in this
+  // same instant, the browser hasn't finished sizing the now-visible
+  // container yet, so Leaflet measures it as 0x0. That doesn't just break
+  // the tiles — it also throws off where Leaflet thinks each pin actually
+  // is on screen, so taps land on the wrong spot (or nothing). Waiting one
+  // tick with setTimeout lets the browser finish showing the screen first.
+  setTimeout(() => {
+    resultsLeafletMap = L.map('leaflet-results-map');
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 19,
+    }).addTo(resultsLeafletMap);
 
-  const allLayers = [];
+    const allLayers = [];
 
-  parcels.forEach((p, i) => {
-    const latLngRings = parcelToLatLngRings(p);
-    let polygon = null;
+    parcels.forEach((p, i) => {
+      const latLngRings = parcelToLatLngRings(p);
+      let polygon = null;
 
-    if (latLngRings.length) {
-      polygon = L.polygon(latLngRings, { color: '#2563eb', weight: 2, fillOpacity: 0.15 }).addTo(resultsLeafletMap);
-      polygon.on('click', () => showDetailSheet(i));
-      allLayers.push(polygon);
+      if (latLngRings.length) {
+        polygon = L.polygon(latLngRings, { color: '#2563eb', weight: 2, fillOpacity: 0.15 }).addTo(resultsLeafletMap);
+        polygon.on('click', () => showDetailSheet(i));
+        allLayers.push(polygon);
+      }
+
+      const marker = L.marker([p.centroid.lat, p.centroid.lon], { icon: numberedPinIcon(i + 1) }).addTo(resultsLeafletMap);
+      marker.on('click', () => showDetailSheet(i));
+      allLayers.push(marker);
+
+      resultsMarkers.push({ polygon, marker });
+    });
+
+    // Zoom/pan so all 4 parcels are visible at once when the screen opens.
+    if (allLayers.length) {
+      const group = L.featureGroup(allLayers);
+      resultsLeafletMap.fitBounds(group.getBounds().pad(0.2));
+    } else if (parcels.length) {
+      resultsLeafletMap.setView([parcels[0].centroid.lat, parcels[0].centroid.lon], 15);
     }
 
-    const marker = L.marker([p.centroid.lat, p.centroid.lon], { icon: numberedPinIcon(i + 1) }).addTo(resultsLeafletMap);
-    marker.on('click', () => showDetailSheet(i));
-    allLayers.push(marker);
+    // Re-measure the container now that it's definitely visible and sized,
+    // so pin tap targets line up with what you actually see.
+    resultsLeafletMap.invalidateSize();
 
-    resultsMarkers.push({ polygon, marker });
-  });
-
-  // Zoom/pan so all 4 parcels are visible at once when the screen opens.
-  if (allLayers.length) {
-    const group = L.featureGroup(allLayers);
-    resultsLeafletMap.fitBounds(group.getBounds().pad(0.2));
-  } else if (parcels.length) {
-    resultsLeafletMap.setView([parcels[0].centroid.lat, parcels[0].centroid.lon], 15);
-  }
-
-  // Hide the "tap a pin" hint the first time a parcel is opened.
-  const hint = document.getElementById('map-hint');
-  hint.classList.remove('hidden');
+    // Hide the "tap a pin" hint the first time a parcel is opened.
+    const hint = document.getElementById('map-hint');
+    hint.classList.remove('hidden');
+  }, 0);
 }
+
+// Phones show/hide their address bar as you scroll, which resizes the
+// visible page after the map already loaded. Re-measuring on resize keeps
+// pin tap targets accurate instead of drifting out of sync with the tiles.
+window.addEventListener('resize', () => {
+  if (resultsLeafletMap) resultsLeafletMap.invalidateSize();
+  if (leafletMap) leafletMap.invalidateSize();
+});
 
 // Fills in and slides up the bottom detail sheet for one parcel.
 function showDetailSheet(index) {
@@ -286,6 +307,8 @@ function openMap(index) {
   } else {
     leafletMap.setView([p.centroid.lat, p.centroid.lon], 17);
   }
+
+  setTimeout(() => leafletMap && leafletMap.invalidateSize(), 0);
 }
 
 function showError(message) {
