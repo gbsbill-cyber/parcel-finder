@@ -4,13 +4,16 @@ const RESULT_COUNT = 4;
 const screens = {
   start: document.getElementById('screen-start'),
   loading: document.getElementById('screen-loading'),
-  results: document.getElementById('screen-results'),
+  resultsMap: document.getElementById('screen-results-map'),
   map: document.getElementById('screen-map'),
   error: document.getElementById('screen-error'),
 };
 
 let currentParcels = [];
-let leafletMap = null;
+let leafletMap = null;          // single-parcel "full outline" map (screen-map)
+let resultsLeafletMap = null;   // multi-parcel overview map (screen-results-map)
+let resultsMarkers = [];        // Leaflet layers (polygon + marker) per parcel, for the overview map
+let selectedParcelIndex = null; // which parcel is currently shown in the bottom sheet
 
 function showScreen(name) {
   Object.values(screens).forEach((el) => el.classList.add('hidden'));
@@ -125,12 +128,6 @@ function formatAcres(value) {
   return `${value.toFixed(2)} acres`;
 }
 
-function formatAnnualTax(annualTax) {
-  if (!annualTax || !annualTax.amount) return 'Not publicly available';
-  const estimateTag = annualTax.estimated ? ` (estimate @ $${annualTax.ratePer100.toFixed(4)}/$100 assessed)` : '';
-  return formatMoney(annualTax.amount) + estimateTag;
-}
-
 function formatSalePrice(salePrice) {
   if (!salePrice || salePrice.amount === null || salePrice.amount === undefined) return 'Not available';
   if (salePrice.nominal) return 'Not available (nominal transfer on record, not a market sale)';
@@ -155,47 +152,106 @@ function row(label, value) {
   return wrap;
 }
 
-function renderResults(parcels) {
-  const list = document.getElementById('results-list');
-  list.innerHTML = '';
+// Convert a parcel's Esri "rings" (arrays of [lon, lat] points) into the
+// [lat, lon] point lists Leaflet expects for drawing a polygon.
+function parcelToLatLngRings(p) {
+  return (p.rings || []).map((ring) => ring.map(([lon, lat]) => [lat, lon]));
+}
+
+// A small blue teardrop pin with a number in it (1 = closest parcel).
+// Used on the multi-parcel overview map so you can tell at a glance which
+// pin is which without opening anything.
+function numberedPinIcon(number) {
+  return L.divIcon({
+    className: '', // avoid Leaflet's default marker box/shadow styling
+    html: `<div class="parcel-pin"><span>${number}</span></div>`,
+    iconSize: [30, 30],
+    iconAnchor: [15, 30],
+  });
+}
+
+// --- Multi-parcel overview map (screen-results-map) --------------------
+
+function renderResultsMap(parcels) {
+  showScreen('resultsMap');
+  hideDetailSheet();
+
+  if (resultsLeafletMap) {
+    resultsLeafletMap.remove();
+    resultsLeafletMap = null;
+  }
+  resultsMarkers = [];
+
+  resultsLeafletMap = L.map('leaflet-results-map');
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors',
+    maxZoom: 19,
+  }).addTo(resultsLeafletMap);
+
+  const allLayers = [];
 
   parcels.forEach((p, i) => {
-    const card = document.createElement('button');
-    card.className = 'card';
-    card.type = 'button';
-    card.addEventListener('click', () => openMap(i));
+    const latLngRings = parcelToLatLngRings(p);
+    let polygon = null;
 
-    const title = document.createElement('div');
-    title.className = 'card-title';
-    title.textContent = p.owner || 'Owner not on record';
-    card.appendChild(title);
+    if (latLngRings.length) {
+      polygon = L.polygon(latLngRings, { color: '#2563eb', weight: 2, fillOpacity: 0.15 }).addTo(resultsLeafletMap);
+      polygon.on('click', () => showDetailSheet(i));
+      allLayers.push(polygon);
+    }
 
-    const dist = document.createElement('div');
-    dist.className = 'card-distance';
-    dist.textContent = formatDistance(p.distanceMeters);
-    card.appendChild(dist);
+    const marker = L.marker([p.centroid.lat, p.centroid.lon], { icon: numberedPinIcon(i + 1) }).addTo(resultsLeafletMap);
+    marker.on('click', () => showDetailSheet(i));
+    allLayers.push(marker);
 
-    card.appendChild(row('Parcel ID (APN)', p.apn || 'Not available'));
-    card.appendChild(row('Address', p.address || 'Not available'));
-    card.appendChild(row('Acreage', formatAcres(p.acreage)));
-    card.appendChild(row('Tax-assessed value', formatMoney(p.taxValue)));
-    card.appendChild(row('Annual property tax', formatAnnualTax(p.annualTax)));
-    card.appendChild(
-      row('Last sale price', formatSalePrice(p.salePrice))
-    );
-    card.appendChild(row('Last sale date', formatDate(p.saleDate)));
-    card.appendChild(row('Data source', p.sourceLabel));
-
-    const tapHint = document.createElement('div');
-    tapHint.className = 'tap-hint';
-    tapHint.textContent = 'Tap to view on map ›';
-    card.appendChild(tapHint);
-
-    list.appendChild(card);
+    resultsMarkers.push({ polygon, marker });
   });
 
-  showScreen('results');
+  // Zoom/pan so all 4 parcels are visible at once when the screen opens.
+  if (allLayers.length) {
+    const group = L.featureGroup(allLayers);
+    resultsLeafletMap.fitBounds(group.getBounds().pad(0.2));
+  } else if (parcels.length) {
+    resultsLeafletMap.setView([parcels[0].centroid.lat, parcels[0].centroid.lon], 15);
+  }
+
+  // Hide the "tap a pin" hint the first time a parcel is opened.
+  const hint = document.getElementById('map-hint');
+  hint.classList.remove('hidden');
 }
+
+// Fills in and slides up the bottom detail sheet for one parcel.
+function showDetailSheet(index) {
+  const p = currentParcels[index];
+  if (!p) return;
+  selectedParcelIndex = index;
+
+  document.getElementById('map-hint').classList.add('hidden');
+
+  document.getElementById('sheet-title').textContent = p.owner || 'Owner not on record';
+  document.getElementById('sheet-distance').textContent = formatDistance(p.distanceMeters);
+
+  const rowsWrap = document.getElementById('sheet-rows');
+  rowsWrap.innerHTML = '';
+  rowsWrap.appendChild(row('Parcel ID (APN)', p.apn || 'Not available'));
+  rowsWrap.appendChild(row('Address', p.address || 'Not available'));
+  rowsWrap.appendChild(row('Acreage', formatAcres(p.acreage)));
+  rowsWrap.appendChild(row('Tax-assessed value', formatMoney(p.taxValue)));
+  rowsWrap.appendChild(row('Annual property tax', 'Not publicly available (see note above)'));
+  rowsWrap.appendChild(row('Last sale price', formatSalePrice(p.salePrice)));
+  rowsWrap.appendChild(row('Last sale date', formatDate(p.saleDate)));
+  rowsWrap.appendChild(row('Data source', p.sourceLabel));
+
+  document.getElementById('detail-sheet').classList.add('open');
+}
+
+function hideDetailSheet() {
+  selectedParcelIndex = null;
+  document.getElementById('detail-sheet').classList.remove('open');
+}
+
+// --- Single-parcel full outline map (screen-map) ------------------------
+// Reached from the bottom sheet's "View Full Parcel Outline" button.
 
 function openMap(index) {
   const p = currentParcels[index];
@@ -217,7 +273,7 @@ function openMap(index) {
     maxZoom: 19,
   }).addTo(leafletMap);
 
-  const latLngRings = (p.rings || []).map((ring) => ring.map(([lon, lat]) => [lat, lon]));
+  const latLngRings = parcelToLatLngRings(p);
   let bounds;
   if (latLngRings.length) {
     const polygon = L.polygon(latLngRings, { color: '#2563eb', weight: 3, fillOpacity: 0.15 }).addTo(leafletMap);
@@ -255,7 +311,7 @@ async function findNearby() {
           return;
         }
         currentParcels = parcels;
-        renderResults(parcels);
+        renderResultsMap(parcels);
       } catch (e) {
         showError(e.message || 'Something went wrong looking up parcels. Try again.');
       }
@@ -273,5 +329,9 @@ async function findNearby() {
 
 document.getElementById('find-btn').addEventListener('click', findNearby);
 document.getElementById('retry-btn').addEventListener('click', findNearby);
-document.getElementById('back-btn').addEventListener('click', () => showScreen('results'));
-document.getElementById('search-again-btn').addEventListener('click', findNearby);
+document.getElementById('refresh-map-btn').addEventListener('click', findNearby);
+document.getElementById('sheet-close-btn').addEventListener('click', hideDetailSheet);
+document.getElementById('view-full-btn').addEventListener('click', () => {
+  if (selectedParcelIndex !== null) openMap(selectedParcelIndex);
+});
+document.getElementById('back-btn').addEventListener('click', () => showScreen('resultsMap'));
